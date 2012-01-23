@@ -1,0 +1,115 @@
+<?php
+
+/**
+* Implements hook_menu().
+*/
+function j2d_menu() {
+  $items = array();
+
+  $items['admin/config/j2d'] = array(
+    'title' => 'J2D',
+    'description' => 'Configuration for J2D module',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('j2d_admin_form'),
+    'access arguments' => array('access administration pages'),
+    'type' => MENU_NORMAL_ITEM,
+  );
+
+  return $items;
+}
+
+/**
+* Form function, called by drupal_get_form()
+* in j2d_menu().
+*/
+function j2d_admin_form($form, &$form_state) {
+  $joomla_users_table_name = variable_get('joomla_users_table_name', 'jos_users');
+
+  // get the Joomla! users count
+  $query = db_select($joomla_users_table_name, 'ju');
+  $query->fields('ju');
+  $result = $query->execute();
+  $number_of_rows = $result->rowCount();
+  drupal_set_message(t('Number of Joomla! users : !users', array('!users'=> $number_of_rows)));
+
+  // display the form
+  $form['joomla_users_table_name'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Joomla! users table name'),
+    '#default_value' => $joomla_users_table_name,
+    '#description' => t('The Joomla! users table name.'),
+    '#required' => TRUE,
+  );
+
+  return system_settings_form($form);
+}
+
+function j2d_get_joomla_user($username, $password) {
+  // get the user
+  $query = db_select(variable_get('joomla_users_table_name', 'jos_users'), 'ju');
+  $query
+  ->condition('ju.username', $username, '=')
+  ->fields('ju');
+  $result = $query->execute();
+  $record = $result->fetchObject();
+
+  // check for the password
+  if (!empty($record)) {
+    $pass_items = explode(':', $record->password);
+    $pass = md5($password.$pass_items[1]);
+    if ($pass == $pass_items[0]) {
+      return $record;
+    }
+  }
+  return FALSE;
+}
+
+function j2d_form_alter(&$form, &$form_state, $form_id) {
+  if ($form_id == 'user_login_block' || $form_id == 'user_login') {
+    array_unshift($form['#validate'], 'j2d_login_authenticate_validate');
+  }
+}
+
+function j2d_login_authenticate_validate($form, &$form_state) {
+  // check if the user has a Drupal account
+  $account = db_query("SELECT * FROM {users} WHERE name = :name AND status = 1", array(':name' => $form_state['values']['name']))->fetchObject();
+  if ($account) {
+    return;
+  }
+  else {
+    // check if the user has a Joomla! account
+    $joomla_user = j2d_get_joomla_user($form_state['values']['name'], trim($form_state['values']['pass']));
+    if ($joomla_user) {
+      // create the Drupal user
+      $account = new stdClass;
+      $account->uid = 0;
+      $account->hostname = '127.0.0.1';
+      $account->roles = array('1' => 'anonymous user');
+      $account->cache = 0;
+
+      $form_state['values']['init'] = $joomla_user->email;
+      $form_state['values']['mail'] = $joomla_user->email;
+      $form_state['values']['status'] = 1;
+      $form_state['values']['created'] = strtotime($joomla_user->registerdate);
+
+      form_state_values_clean($form_state);
+      entity_form_submit_build_entity('user', $account, $form, $form_state);
+      $edit = array_intersect_key((array) $account, $form_state['values']);
+      $account = user_save($account, $edit);
+
+      // Terminate if an error occurred during user_save().
+      if (!$account) {
+        drupal_set_message(t("Error saving user account."), 'error');
+        return;
+      }
+      else {
+        drupal_set_message(t('Your account is now synchronized.'));
+        // delete the Joomla! account
+        db_delete(variable_get('joomla_users_table_name', 'jos_users'))
+        ->condition('id', $joomla_user->id)
+        ->execute();
+      }
+    }
+  }
+  return;
+}

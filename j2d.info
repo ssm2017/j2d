@@ -1,0 +1,3 @@
+name = j2d
+description = This module allows you to synchronize Joomla! 1.5 users to Drupal 7 users when trying to login.
+core = 7.x
