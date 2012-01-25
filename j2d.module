@@ -89,7 +89,7 @@ function j2d_login_authenticate_validate($form, &$form_state) {
 
       $form_state['values']['init'] = $joomla_user->email;
       $form_state['values']['mail'] = $joomla_user->email;
-      $form_state['values']['status'] = 1;
+      $form_state['values']['status'] = $joomla_user->block;
       $form_state['values']['created'] = strtotime($joomla_user->registerdate);
 
       form_state_values_clean($form_state);
